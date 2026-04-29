@@ -11,7 +11,10 @@ int main(int argc, char** argv)
 {
     // Ensure input and output paths are provided
     if (argc < 3) return 1;
-    
+
+    std::string inputPath = argv[1];
+    std::string outputPath = argv[2];
+
     try
     {
         std::string inputPath = argv[1];
@@ -32,47 +35,56 @@ int main(int argc, char** argv)
 
 void ProcessAscii(const std::string& inputPath, const std::string& outputPath)
 {
-    // Load the image in grayscale mode
-    cv::Mat img = cv::imread(inputPath, cv::IMREAD_GRAYSCALE);
-    if (img.empty()) 
+    // Load source image in BGR color
+    cv::Mat colorImg = cv::imread(inputPath, cv::IMREAD_COLOR);
+    if (colorImg.empty())
     {
         throw std::runtime_error(std::string("Can't open image: ") + inputPath);
     }
 
-    // Create a white background for the ASCII art
-    cv::Mat asciiArt = cv::Mat(img.rows, img.cols, CV_8UC3, cv::Scalar(255, 255, 255));
+    // Create grayscale copy for brightness analysis
+    cv::Mat grayImg;
+    cv::cvtColor(colorImg, grayImg, cv::COLOR_BGR2GRAY);
 
-    // Characters sorted by visual density (darkest to lightest)
-    const std::string chars = "@$#8W9H4Zl(r/!:. ";
-    int stepX = 3;// Cell width for character sampling
-    int stepY = 5;// Cell height for character sampling
+    // Improve contrast and brightness for better character mapping
+    cv::equalizeHist(grayImg, grayImg);
+    grayImg.convertTo(grayImg, -1, 1.1, 10);
 
-    // Image pre-processing: equalize histogram and adjust contrast/brightness
-    equalizeHist(img, img);
-    img.convertTo(img, -1, 1.3, -40);
+    // Set output canvas scale and background color (White)
+    float scale = 3.0f;
+    cv::Mat asciiArt = cv::Mat(colorImg.rows * scale, colorImg.cols * scale, CV_8UC3, cv::Scalar(255, 255, 255));
 
-    // Iterate through image blocks (cells)
-    for (int y = stepY; y < img.rows; y += stepY)
+    // Characters sorted by visual density
+    const std::string chars = "@%#*+=-:. ";
+    float stepX = 1.9;
+    float stepY = 3.8;
+
+    // Process image by cells
+    for (int y = stepY; y < colorImg.rows; y += stepY)
     {
-        for (int x = 0; x < img.cols; x += stepX)
+        for (int x = 0; x < colorImg.cols; x += stepX)
         {
-            if (x + stepX > img.cols || y > img.rows) continue;
+            if (x + stepX > colorImg.cols || y > colorImg.rows) continue;
 
-            // Calculate average brightness of the current cell
-            cv::Rect rect(x, y - stepY, stepX, stepY);
-            cv::Scalar meanBrightness = cv::mean(img(rect));
+            cv::Rect rect(x, y - stepY, (int)stepX, (int)stepY);
+
+            // Get average color from source and brightness from grayscale
+            cv::Scalar meanColor = cv::mean(colorImg(rect));
+            cv::Scalar meanBrightness = cv::mean(grayImg(rect));
             int brightness = static_cast<int>(meanBrightness.val[0]);
 
-            // Map brightness to corresponding ASCII character
+            // Map brightness to ASCII character index
             int index = brightness * (static_cast<int>(chars.length()) - 1) / 255;
             std::string symbol(1, chars[index]);
 
-            // Draw the character on the resulting image
-            putText(asciiArt, symbol, cv::Point(x, y), cv::FONT_HERSHEY_SIMPLEX, 0.22, cv::Scalar(0, 0, 0), 1, cv::LINE_4);
+            // Draw colored character on the upscale canvas
+            cv::putText(asciiArt, symbol,
+                cv::Point(x * scale, (y + stepY / 2) * scale),
+                cv::FONT_HERSHEY_DUPLEX, 0.4,
+                meanColor,
+                1, 8);
         }
     }
-
-    // Save the final ASCII art image
     if (!cv::imwrite(outputPath, asciiArt))
     {
         return;
